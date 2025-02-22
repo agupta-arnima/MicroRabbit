@@ -3,6 +3,7 @@ using MicroRabbit.Transfer.Domain.Events;
 using MicroRabbit.Transfer.RabbitMQBus.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -17,16 +18,18 @@ namespace MicroRabbit.Transfer.RabbitMQBus.Receiver
     //CustomerFullNameUpdateReceiver
     public class TransferMessageReceiver : BackgroundService
     {
-        private IModel _channel;
+        private IChannel _channel;
         private IConnection _connection;
         //private readonly IEventHandler<TransferCreatedEvent> _transferCreatedEventHandler;
         private readonly IServiceScopeFactory _serviceScopeFactory;
+        private readonly ILogger<TransferMessageReceiver> _logger;
+
         private readonly string _hostname;
         private readonly string _queueName;
         private readonly string _username;
         private readonly string _password;
 
-        public TransferMessageReceiver(IOptions<RabbitMqConfiguration> rabbitMqOptions, IServiceScopeFactory serviceScopeFactory)
+        public TransferMessageReceiver(IOptions<RabbitMqConfiguration> rabbitMqOptions, IServiceScopeFactory serviceScopeFactory, ILogger<TransferMessageReceiver> logger)
         {
             _hostname = rabbitMqOptions.Value.Hostname;
             _queueName = rabbitMqOptions.Value.QueueName;
@@ -34,10 +37,11 @@ namespace MicroRabbit.Transfer.RabbitMQBus.Receiver
             _password = rabbitMqOptions.Value.Password;
             //_transferCreatedEventHandler = transferCreatedEventHandler;
             _serviceScopeFactory = serviceScopeFactory;
-            InitializeRabbitMqListener();
+            _logger = logger;
+            InitializeRabbitMqListener().GetAwaiter().GetResult();
         }
 
-        private void InitializeRabbitMqListener()
+        private async Task InitializeRabbitMqListener()
         {
             var factory = new ConnectionFactory
             {
@@ -46,67 +50,66 @@ namespace MicroRabbit.Transfer.RabbitMQBus.Receiver
                 Password = _password
             };
 
-            _connection = factory.CreateConnection();
-            _connection.ConnectionShutdown += RabbitMQ_ConnectionShutdown;
-            _channel = _connection.CreateModel();
-            _channel.QueueDeclare(queue: _queueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
+            _connection = await factory.CreateConnectionAsync();
+            _channel = await _connection.CreateChannelAsync();
+            await _channel.QueueDeclareAsync(queue: _queueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
         }
 
-        protected override Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             stoppingToken.ThrowIfCancellationRequested();
 
-            var consumer = new EventingBasicConsumer(_channel);
-            consumer.Received += (ch, ea) =>
+            var consumer = new AsyncEventingBasicConsumer(_channel);
+            consumer.ReceivedAsync += async (ch, ea) =>
             {
-                var content = System.Text.Encoding.UTF8.GetString(ea.Body.ToArray());
+                var content = Encoding.UTF8.GetString(ea.Body.ToArray());
                 var transferCreatedEvent = System.Text.Json.JsonSerializer.Deserialize<TransferCreatedEvent>(content);
-                HandleMessage(transferCreatedEvent);
-                _channel.BasicAck(ea.DeliveryTag, false);
+                bool processedSuccessfully = false;
+                try
+                {
+                    processedSuccessfully = HandleMessage(transferCreatedEvent);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Exception occurred while processing message from queue {_queueName}: {ex}");
+                }
+                if (processedSuccessfully)
+                {
+                    await _channel.BasicAckAsync(deliveryTag: ea.DeliveryTag, multiple: false);
+                }
+                else
+                {
+                    await _channel.BasicRejectAsync(deliveryTag: ea.DeliveryTag, requeue: true);
+                }
             };
-            consumer.Shutdown += OnConsumerShutdown;
-            consumer.Registered += OnConsumerRegistered;
-            consumer.Unregistered += OnConsumerUnregistered;
-            consumer.ConsumerCancelled += OnConsumerCancelled;
 
-            _channel.BasicConsume(_queueName, false, consumer);
+            await _channel.BasicConsumeAsync(queue: _queueName, autoAck: false, consumer: consumer);
 
-            return Task.CompletedTask;
+            //return Task.CompletedTask;
         }
 
-        private void HandleMessage(TransferCreatedEvent transferCreatedEvent)
+        private bool HandleMessage(TransferCreatedEvent transferCreatedEvent)
         {
-            using (var scope = _serviceScopeFactory.CreateScope())
+            try
             {
-                var _transferCreatedEventHandler = scope.ServiceProvider.GetService<IEventHandler<TransferCreatedEvent>>();
-                _transferCreatedEventHandler.Handle(transferCreatedEvent);
+                using (var scope = _serviceScopeFactory.CreateScope())
+                {
+                    var _transferCreatedEventHandler = scope.ServiceProvider.GetService<IEventHandler<TransferCreatedEvent>>();
+                    _transferCreatedEventHandler.Handle(transferCreatedEvent);
+                    return true;
+                }
             }
-        }
-
-        private void OnConsumerCancelled(object sender, ConsumerEventArgs e)
-        {
-        }
-
-        private void OnConsumerUnregistered(object sender, ConsumerEventArgs e)
-        {
-        }
-
-        private void OnConsumerRegistered(object sender, ConsumerEventArgs e)
-        {
-        }
-
-        private void OnConsumerShutdown(object sender, ShutdownEventArgs e)
-        {
-        }
-
-        private void RabbitMQ_ConnectionShutdown(object sender, ShutdownEventArgs e)
-        {
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error processing message: {ex.Message}");
+                return false;
+            }
         }
 
         public override void Dispose()
         {
-            _channel.Close();
-            _connection.Close();
+            _channel.CloseAsync();
+            _connection.CloseAsync();
             base.Dispose();
         }
     }

@@ -31,6 +31,7 @@ namespace MicroRabbit.Banking.Application.Services
                 accountTransfer.ToAccount, 
                 accountTransfer.TransferAmount);
 
+            //We used a bus to send command/message, we are sending it through bus
             _eventBus.SendCommand(createTransferCommand);
             //Heads over to command handler TransferCommandHandler as it implements IRequestHandler<CreateTransferCommand, bool>
         }

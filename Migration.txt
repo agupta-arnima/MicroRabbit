@@ -1,2 +1,5 @@
 Add-Migration "Initial Migration" -Context BankingDBContext
 Update-Database -Context BankingDBContext
+
+Add-Migration "Initial Migration" -Context TransferDBContext
+Update-Database -Context TransferDBContext

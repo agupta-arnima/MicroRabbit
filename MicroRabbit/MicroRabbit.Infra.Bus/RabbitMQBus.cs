@@ -30,24 +30,27 @@ namespace MicroRabbit.Infra.Bus
             return _mediator.Send(command);
         }
 
-        public void Publish<T>(T @event) where T : Event
+        //Publish events to RabbitMQ Server
+        public async Task Publish<T>(T @event) where T : Event
         {
             var factory = new ConnectionFactory()
             {
                 HostName = "localhost"
             };
-            using (var connection = factory.CreateConnection())  //Open the connection
-            using (var channel = connection.CreateModel())       //Open the channel
+            using (var connection = await factory.CreateConnectionAsync())  //Open the connection
+            using (var channel = await connection.CreateChannelAsync())       //Open the channel
             {
                 var eventName = @event.GetType().Name;
-                channel.QueueDeclare(eventName, false, false, false, null); //Queue name and Routing key both are eventname
+                await channel.QueueDeclareAsync(eventName, false, false, false, null); //Queue name and Routing key both are eventname
                 var message = System.Text.Json.JsonSerializer.Serialize(@event);
                 var body = System.Text.Encoding.UTF8.GetBytes(message);
-                channel.BasicPublish("", eventName, null, body);
+                await channel.BasicPublishAsync("", eventName, body);
+                //In the case of Default Exchange, the binding key will be the same as the name of the queue.
+                //So, the messages will also have the same routing-key as the Queue name.
             }
         }
 
-        public void Subscribe<TE, TEH>()
+        public async Task Subscribe<TE, TEH>()
             where TE : Event
             where TEH : IEventHandler<TE>
         {
@@ -71,25 +74,25 @@ namespace MicroRabbit.Infra.Bus
 
             //_handlers[eventType.Name].Add(handlerType);
 
-            StartBasicConsume<TE>();
+            await StartBasicConsume<TE>();
         }
 
-        private void StartBasicConsume<TE>() where TE : Event
+        private async Task StartBasicConsume<TE>() where TE : Event
         {
             var factory = new ConnectionFactory()
             {
-                HostName = "localhost",
-                DispatchConsumersAsync = true
+                HostName = "localhost"                
+                //DispatchConsumersAsync = true
             };
-            using (var connection = factory.CreateConnection())  //Open the connection
-            using (var channel = connection.CreateModel())       //Open the channel
+            using (var connection = await factory.CreateConnectionAsync())  //Open the connection
+            using (var channel = await connection.CreateChannelAsync())       //Open the channel
             {
                 var eventName = typeof(TE).Name;
-                channel.QueueDeclare(eventName, false, false, false, null);
+                await channel.QueueDeclareAsync(eventName, false, false, false, null);
                 var consumer = new AsyncEventingBasicConsumer(channel);
-                consumer.Received += Consumer_Received;
+                consumer.ReceivedAsync += Consumer_Received;
 
-                channel.BasicConsume(eventName, true, consumer);  //Bind consumer with Queue
+                await channel.BasicConsumeAsync(eventName, true, consumer);  //Bind consumer with Queue
             }
         }
 
@@ -99,12 +102,12 @@ namespace MicroRabbit.Infra.Bus
             var message = System.Text.Encoding.UTF8.GetString(e.Body.ToArray());
             //try
             //{
-                //Based on Handlers we will process our event
-                await ProcessEvent(eventName, message).ConfigureAwait(false);
+            //Based on Handlers we will process our event
+            await ProcessEvent(eventName, message).ConfigureAwait(false);
             //}
             //catch (Exception ex)
             //{
-                
+
             //}
         }
 
@@ -118,6 +121,7 @@ namespace MicroRabbit.Infra.Bus
                     foreach (Type subscription in subscriptions)
                     {
                         //var handler = Activator.CreateInstance(subscription);
+                        //instead of creating instance we can ask for instance from container
                         var handler = scope.ServiceProvider.GetService(subscription);
                         if (handler == null)
                             continue;

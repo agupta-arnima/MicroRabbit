@@ -29,10 +29,10 @@ namespace MicroRabbit.Baking.Api
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddDbContext<BankingDbContext>(options =>
-            {
-                options.UseSqlServer(Configuration.GetConnectionString("BankingDbConnection"));
-            });
+            //services.AddDbContext<BankingDbContext>(options =>
+            //{
+            //    options.UseSqlServer(Configuration.GetConnectionString("BankingDbConnection"));
+            //});
             services.AddControllers();
 
             //OpenApiInfo
@@ -54,13 +54,15 @@ namespace MicroRabbit.Baking.Api
                     Version = "v1"
                 });
             });
-            services.AddMediatR(typeof(Startup));
+            //services.AddMediatR(typeof(Startup));            
+            services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblies(typeof(Startup).Assembly));
+
             RegisterServices(services);
         }
 
         private void RegisterServices(IServiceCollection services)
         {
-            DependencyContainer.RegisterServices(services);
+            DependencyContainer.RegisterServices(services,  Configuration);
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

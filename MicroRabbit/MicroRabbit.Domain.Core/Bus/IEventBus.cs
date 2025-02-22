@@ -10,8 +10,10 @@ namespace MicroRabbit.Domain.Core.Bus
     public interface IEventBus
     {
         Task SendCommand<T>(T command) where T : Command;
-        void Publish<T>(T @event) where T : Event;
-        void Subscribe<TE, TEH>()
+        Task Publish<T>(T @event) where T : Event;
+        //event is reserved keyword
+        //Publish and Subscribe events
+        Task Subscribe<TE, TEH>()
             where TE : Event
             where TEH : IEventHandler<TE>;    
     }

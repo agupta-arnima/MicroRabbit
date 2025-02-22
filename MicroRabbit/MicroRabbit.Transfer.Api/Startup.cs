@@ -38,10 +38,10 @@ namespace MicroRabbit.Transfer.Api
             var serviceClientSettings = serviceClientSettingsConfig.Get<RabbitMqConfiguration>();
             services.Configure<RabbitMqConfiguration>(serviceClientSettingsConfig);
 
-            services.AddDbContext<TransferDbContext>(options =>
-            {
-                options.UseSqlServer(Configuration.GetConnectionString("TransferDbConnection"));
-            });
+            //services.AddDbContext<TransferDbContext>(options =>
+            //{
+            //    options.UseSqlServer(Configuration.GetConnectionString("TransferDbConnection"));
+            //});
 
             services.AddControllers();
 
@@ -53,9 +53,10 @@ namespace MicroRabbit.Transfer.Api
                     Version = "v1"
                 });
             });
-            
-            services.AddMediatR(typeof(Startup));
-            
+
+            //services.AddMediatR(typeof(Startup));
+            services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblies(typeof(Startup).Assembly));
+
             RegisterServices(services);
 
             if (serviceClientSettings.Enabled)
@@ -66,7 +67,7 @@ namespace MicroRabbit.Transfer.Api
 
         private void RegisterServices(IServiceCollection services)
         {
-            DependencyContainer.RegisterServices(services);
+            DependencyContainer.RegisterServices(services, Configuration);
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -90,7 +91,7 @@ namespace MicroRabbit.Transfer.Api
                 c.SwaggerEndpoint("/swagger/v1/swagger.json", "Transfer Microservice v1");
             });
 
-            //ConfigureEventBus(app);
+            ConfigureEventBus(app);
 
             app.UseEndpoints(endpoints =>
             {
@@ -98,10 +99,10 @@ namespace MicroRabbit.Transfer.Api
             });
         }
 
-        //private void ConfigureEventBus(IApplicationBuilder app)
-        //{
-        //    var eventBus = app.ApplicationServices.GetRequiredService<IEventBus>();
-        //    eventBus.Subscribe<TransferCreatedEvent, TransferEventHandler>();
-        //}
+        private void ConfigureEventBus(IApplicationBuilder app)
+        {
+            var eventBus = app.ApplicationServices.GetRequiredService<IEventBus>();
+            eventBus.Subscribe<TransferCreatedEvent, TransferEventHandler>();
+        }
     }
 }
